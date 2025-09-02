@@ -1,0 +1,51 @@
+{
+  "name": "outgoing-caller",
+  "version": "1.0.0",
+  "description": "Node.js backend for AI-powered voice chat with WebSocket and audio processing.",
+  "main": "index.js",
+  "scripts": {
+    "start": "nodemon --exec ts-node index.ts"
+  },
+  "dependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "axios": "^1.11.0",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "csv-parser": "^3.2.0",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "kokoro-js": "^1.2.1",
+    "multer": "^2.0.2",
+    "nodejs-whisper": "^0.2.9",
+    "nodemon": "^3.1.10",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
+    "wavefile": "^11.0.0",
+    "ws": "^8.18.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "websocket",
+    "audio",
+    "speech-to-text",
+    "text-to-speech",
+    "ai",
+    "kokoro-js"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.3.0",
+    "@types/sqlite3": "^3.1.11",
+    "@types/ws": "^8.18.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  }
+}
