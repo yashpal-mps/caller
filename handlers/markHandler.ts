@@ -31,7 +31,6 @@ export class MarkHandler {
 
     const markResponse: MarkMessage = {
       event: "mark",
-      sequenceNumber: getNextSequenceNumber(state),
       streamSid: state.streamSid,
       mark: {
         name: markName,
@@ -48,12 +47,11 @@ export class MarkHandler {
   static sendAllPendingMarks(socket: WebSocket, state: ConnectionState): void {
     if (!state.streamSid || !state.pendingMarks.length) return;
 
-    logger.info(`Sending ${state.pendingMarks.length} pending marks`);
+    console.log(`Sending ${state.pendingMarks.length} pending marks`);
 
     for (const markName of state.pendingMarks) {
       const markMessage: MarkMessage = {
         event: "mark",
-        sequenceNumber: getNextSequenceNumber(state),
         streamSid: state.streamSid,
         mark: {
           name: markName,
@@ -69,11 +67,24 @@ export class MarkHandler {
   }
 
   static processMarkEvent(socket: WebSocket, state: ConnectionState, markName: string): void {
-    logger.info(`Processing mark event: ${markName}`);
+    console.log(`Processing mark event: ${markName}`);
+
+    // // Ignore marks that are sent by the application itself
+    // if (markName === "start" || markName.startsWith("empty-response-") || markName.startsWith("ai-response-")) {
+    //   const markMessage: MarkMessage = {
+    //     event: "mark",
+    //     streamSid: state.streamSid as string,
+    //     mark: {
+    //       name: markName,
+    //     },
+    //   }
+    //   console.log(`Skipping media processing for application-generated mark: ${markName}`);
+    //   return;
+    // }
 
     // Process all collected chunks if any
     if (state.mediaChunks && state.mediaChunks.length > 0) {
-      logger.info(`Processing ${state.mediaChunks.length} collected audio chunks`);
+      console.log(`Processing ${state.mediaChunks.length} collected audio chunks -------------------------------------------------------------------------`);
 
       // Create a consolidated media message with all chunks
       const consolidatedMedia: MediaMessage = {
@@ -88,16 +99,18 @@ export class MarkHandler {
       };
 
       // Process the complete audio
-      handleAudioProcessing(socket, state, consolidatedMedia, false);
+      handleAudioProcessing(socket, state, consolidatedMedia);
+    }
 
-      // Clear the buffer after processing
-      state.mediaChunks = [];
-      logger.info("Audio chunks processed and buffer cleared");
+    // Clear the buffer after processing (or attempting to process)
+    if (state.mediaChunks && state.mediaChunks.length > 0) { // Only clear if there were chunks to begin with
+        state.mediaChunks = [];
+        console.log("Audio chunks processed and buffer cleared");
     }
 
     // Add mark to pending marks
     state.pendingMarks.push(markName);
-    logger.info(`Added mark '${markName}' to pending marks`);
+    console.log(`Added mark '${markName}' to pending marks`);
   }
 
   private static combineAudioChunks(chunks: Array<{ payload: string, chunk: number, timestamp?: number }>): string {

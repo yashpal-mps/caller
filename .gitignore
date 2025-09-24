@@ -32,7 +32,6 @@ pnpm-debug.log*
 *.wav
 *.mp3
 audio_samples/
-sample.wav
 
 
 # IDE / Editor configs

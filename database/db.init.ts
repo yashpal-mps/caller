@@ -6,7 +6,7 @@ async function initializeDatabase() {
     const db = await DatabaseConnection.getConnection();
 
     try {
-        logger.info('Initializing database schema...');
+        console.log('Initializing database schema...');
 
         // First, check if the users table exists
         const userTableExists = await db.get(
@@ -17,21 +17,21 @@ async function initializeDatabase() {
             // Check if table has all required columns
             const tableInfo = await db.all("PRAGMA table_info(users)");
             const columnNames = tableInfo.map(col => col.name);
-            
+
             // If table exists but missing required columns, drop and recreate
             if (!columnNames.includes('name') || !columnNames.includes('phone')) {
-                logger.info('Updating users table schema...');
-                
+                console.log('Updating users table schema...');
+
                 // Backup existing data if needed
                 // ...
-                
+
                 // Drop the existing table
                 await db.exec("DROP TABLE users");
-                
+
                 // Table will be recreated below
-                logger.info('Dropped outdated users table');
+                console.log('Dropped outdated users table');
             } else {
-                logger.info('Users table schema is up to date');
+                console.log('Users table schema is up to date');
             }
         }
 
@@ -57,18 +57,18 @@ async function initializeDatabase() {
             // Check if table has the correct schema
             const tableInfo = await db.all("PRAGMA table_info(contacts)");
             const columnNames = tableInfo.map(col => col.name);
-            
+
             // If contacts table exists but has a different schema than expected, recreate it
             if (!columnNames.includes('name') || !columnNames.includes('phone')) {
-                logger.info('Updating contacts table schema...');
-                
+                console.log('Updating contacts table schema...');
+
                 // Drop the existing table
                 await db.exec("DROP TABLE contacts");
-                
+
                 // Table will be recreated below
-                logger.info('Dropped outdated contacts table');
+                console.log('Dropped outdated contacts table');
             } else {
-                logger.info('Contacts table schema is up to date');
+                console.log('Contacts table schema is up to date');
             }
         }
 
@@ -83,7 +83,7 @@ async function initializeDatabase() {
         )
         `);
 
-        logger.info('Database schema initialized successfully');
+        console.log('Database schema initialized successfully');
     } catch (error) {
         logger.error('Failed to initialize database schema:', error);
         throw error;

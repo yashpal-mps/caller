@@ -16,7 +16,7 @@ import DatabaseConnection from './database/db.connection';
 (async () => {
   try {
     await initializeDatabase();
-    logger.info('Database initialized successfully');
+    console.log('Database initialized successfully');
   } catch (error) {
     logger.error('Failed to initialize database:', error);
     process.exit(1);
@@ -47,7 +47,7 @@ app.get('/', (req, res) => {
 const server = http.createServer(app);
 
 // Create WebSocket server
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ noServer: true });
 
 // Connection tracking
 const clientState: ConnectionState = {
@@ -61,7 +61,7 @@ const clientState: ConnectionState = {
 
 // WebSocket connection handler
 wss.on('connection', (ws: WebSocket) => {
-  logger.info('Client connected');
+  console.log('Client connected');
 
   // Only allow one client at a time
   if (clientState.socket && clientState.socket.readyState === WebSocket.OPEN) {
@@ -92,8 +92,7 @@ wss.on('connection', (ws: WebSocket) => {
         MessageHandler.sendError(
           ws,
           clientState,
-          `Failed to process message: ${
-            error instanceof Error ? error.message : 'Unknown error'
+          `Failed to process message: ${error instanceof Error ? error.message : 'Unknown error'
           }`,
           1004
         );
@@ -103,7 +102,7 @@ wss.on('connection', (ws: WebSocket) => {
 
   // Close handler
   ws.on('close', () => {
-    logger.info('Client disconnected');
+    console.log('Client disconnected');
     clientState.socket = null;
     clientState.streamSid = null;
     clientState.pendingMarks = [];
@@ -115,29 +114,42 @@ wss.on('connection', (ws: WebSocket) => {
   });
 });
 
+// 🔑 Handle WebSocket upgrade
+server.on('upgrade', (req, socket, head) => {
+  console.log("🔗 Upgrade request:", req.url, req.headers);
+
+  if (req.url === '/voicebot') {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req);
+    });
+  } else {
+    socket.destroy();
+  }
+});
+
 // Start server
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
-  logger.info(`Server running at http://localhost:${PORT}/`);
-  logger.info(`WebSocket endpoint available at ws://localhost:${PORT}`);
-  logger.info(`Auth endpoints available at http://localhost:${PORT}/auth`);
+  console.log(`Server running at http://localhost:${PORT}/`);
+  console.log(`WebSocket endpoint available at ws://localhost:${PORT}`);
+  console.log(`Auth endpoints available at http://localhost:${PORT}/auth`);
 });
 
 // Handle graceful shutdown
 process.on('SIGTERM', async () => {  // Note: Added async here
-  logger.info('SIGTERM received, shutting down...');
-  
+  console.log('SIGTERM received, shutting down...');
+
   // Close database connection - this is missing in your code
   try {
     await DatabaseConnection.closeConnection();
-    logger.info('Database connection closed');
+    console.log('Database connection closed');
   } catch (error) {
     logger.error('Error closing database connection:', error);
   }
-  
+
   wss.close();
   server.close(() => {
-    logger.info('Server shut down');
+    console.log('Server shut down');
     process.exit(0);
   });
 });

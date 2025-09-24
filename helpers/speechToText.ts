@@ -5,9 +5,7 @@ const os = require("os");
 const { exec, execSync } = require("child_process");
 const util = require("util");
 const {
-  muLawToLinear,
-  applyNoiseReduction,
-  createWavFromPCM,
+  processAudioBuffer,
 } = require("./audioProcessor");
 
 const execPromise = util.promisify(exec);
@@ -15,7 +13,7 @@ const TEMP_DIR = path.join(os.tmpdir(), "whisper-audio");
 const MODELS_DIR = path.join(__dirname, "models");
 const WHISPER_SRC_DIR = path.join(__dirname, "../node_modules/nodejs-whisper/cpp/whisper.cpp");
 const WHISPER_CLI_PATH = path.join(WHISPER_SRC_DIR, "build/bin/whisper-cli");
-const MODEL_PATH = path.join(WHISPER_SRC_DIR, "models/ggml-base.en.bin");
+// const MODEL_PATH = path.join(WHISPER_SRC_DIR, "models/ggml-base.en.bin");
 
 // Available Whisper models
 export const MODELS_LIST: string[] = [
@@ -261,46 +259,20 @@ export async function initWhisper(modelName: string = DEFAULT_MODEL): Promise<bo
 }
 
 /**
- * Process audio buffer to make it compatible with Whisper
- * @param {Buffer} audioBuffer - Raw audio buffer
- * @returns {Buffer} - Processed audio buffer in WAV format
- */
-function processAudioBuffer(audioBuffer: Buffer): Buffer {
-  console.log("🔄 Processing audio buffer...");
-
-  // Convert mu-law to PCM
-  const pcmData = new Int16Array(audioBuffer.length);
-  for (let i = 0; i < audioBuffer.length; i++) {
-    pcmData[i] = muLawToLinear(audioBuffer[i]);
-  }
-
-  // Apply noise reduction
-  const cleanedPcm = applyNoiseReduction(pcmData);
-
-  // Create WAV from PCM data
-  const wavBuffer = createWavFromPCM(cleanedPcm, 8000);
-  console.log(
-    `✅ Audio processed: ${audioBuffer.length} bytes → ${wavBuffer.length} bytes`
-  );
-
-  return wavBuffer;
-}
-
-/**
  * Transcribe audio buffer using Whisper directly
  * @param {Buffer} audioBuffer - Audio buffer to transcribe
  * @param {Object} options - Additional options for transcription
  * @returns {Promise<{transcription: string, audioFiles?: {original?: string, processed?: string}}>} - Transcription result and audio file paths
  */
 export async function transcribeAudio(
-  audioBuffer: Buffer, 
-  options: { 
-    modelName?: string, 
+  audioBuffer: Buffer,
+  options: {
+    modelName?: string,
     saveAudio?: boolean | 'original' | 'processed' | 'both',
     outputDir?: string,
     jobId?: string
   } = {}
-): Promise<{transcription: string, audioFiles?: {original?: string, processed?: string}}> {
+): Promise<{ transcription: string, audioFiles?: { original?: string, processed?: string } }> {
   console.log("🔄 Transcribing audio with Whisper (direct execution)...");
 
   if (!modelInitialized) {
@@ -312,66 +284,61 @@ export async function transcribeAudio(
   }
 
   let jobDir: string | undefined;
-  let audioFiles: {original?: string, processed?: string} = {};
-  
+  let audioFiles: { original?: string, processed?: string } = {};
+
   try {
     // Create dedicated output directory for this job
     const jobId = options.jobId || Date.now().toString();
-    const baseDir = options.outputDir || path.join(__dirname, "whisper_jobs");
+    const baseDir = options.outputDir || path.join(TEMP_DIR, "whisper_jobs"); // Use TEMP_DIR for whisper_jobs
     jobDir = path.join(baseDir, `job_${jobId}`);
 
     if (!fs.existsSync(baseDir)) {
       fs.mkdirSync(baseDir, { recursive: true });
     }
-    fs.mkdirSync(jobDir, { recursive: true });
+    // Only create jobDir if it doesn't exist, to avoid errors when jobId is a streamSid
+    if (!fs.existsSync(jobDir)) {
+      fs.mkdirSync(jobDir, { recursive: true });
+    }
 
-    // First, save the original audio buffer
-    const originalFile = path.join(jobDir, "original.raw");
-    fs.writeFileSync(originalFile, audioBuffer);
-    console.log(`✅ Saved original audio file: ${originalFile} (${audioBuffer.length} bytes)`);
-    audioFiles.original = originalFile;
-
-    // Process the audio for transcription
-    console.log("🔄 Processing audio for transcription...");
-    const processedAudio = processAudioBuffer(audioBuffer);
-
-    // Save the processed audio
+    // Save the processed audio (which is the input audioBuffer itself)
     const inputFile = path.join(jobDir, "input.wav");
-    fs.writeFileSync(inputFile, processedAudio);
-    console.log(`✅ Saved processed audio file: ${inputFile} (${processedAudio.length} bytes)`);
-    audioFiles.processed = inputFile;
+    fs.writeFileSync(inputFile, audioBuffer);
+    console.log(`✅ Saved input audio file for Whisper: ${inputFile} (${audioBuffer.length} bytes)`);
+
+    // Conditionally set audioFiles.processed based on options.saveAudio
+    if (options.saveAudio === true || options.saveAudio === 'processed' || options.saveAudio === 'both') {
+      audioFiles.processed = inputFile;
+    }
+
+    // Helper function to execute whisper command and get transcription
+    const executeWhisperCommand = async (
+      cliPath: string,
+      modelPath: string | null,
+      inputFilePath: string,
+      outputFilePath: string,
+      extraArgs: string = ""
+    ): Promise<string> => {
+      const command = `\"${cliPath}\" -m \"${modelPath}\" -f \"${inputFilePath}\" -otxt -of \"${outputFilePath}\" -l en ${extraArgs}`;
+      console.log(`Executing command: ${command}`);
+      await execPromise(command); // Execute the command
+      const resultFile = `${outputFilePath}.txt`;
+      if (fs.existsSync(resultFile)) {
+        const transcription = fs.readFileSync(resultFile, "utf8").trim();
+        console.log(`✅ Found output file: ${resultFile}`);
+        console.log(`Output file size: ${fs.statSync(resultFile).size} bytes`);
+        return transcription;
+      }
+      return "";
+    };
 
     // Output path
     const outputPath = path.join(jobDir, "output");
-
-    // Execute command
-    const command = `"${WHISPER_CLI_PATH}" -m "${modelPath}" -f "${inputFile}" -otxt -of "${outputPath}" -l en`;
-
-    console.log(`Executing command: ${command}`);
-    const { stdout, stderr } = await execPromise(command);
-
-    // Log complete command output for debugging
-    console.log("\n--- STDOUT ---");
-    console.log(stdout);
-
-    console.log("\n--- STDERR ---");
-    console.log(stderr);
-
-    // Look for output file
-    const outputFile = `${outputPath}.txt`;
-    let transcription = "";
-
-    if (fs.existsSync(outputFile)) {
-      transcription = fs.readFileSync(outputFile, "utf8").trim();
-      console.log(`✅ Found output file: ${outputFile}`);
-      console.log(`Output file size: ${fs.statSync(outputFile).size} bytes`);
-
-      if (!transcription) {
-        console.log("⚠️ Output file exists but is empty");
-      }
-    } else {
-      console.log(`⚠️ Output file not found: ${outputFile}`);
-    }
+    let transcription = await executeWhisperCommand(
+      WHISPER_CLI_PATH,
+      modelPath,
+      inputFile,
+      outputPath
+    );
 
     // If no transcription yet, try using different parameters
     if (!transcription) {
@@ -380,134 +347,50 @@ export async function transcribeAudio(
       );
 
       const outputPath2 = path.join(jobDir, "output_sensitive");
-      const command2 = `"${WHISPER_CLI_PATH}" -m "${modelPath}" -f "${inputFile}" -otxt -of "${outputPath2}" -l en -nth 0.1 -wt 0.01`;
-
-      await execPromise(command2);
-
-      const outputFile2 = `${outputPath2}.txt`;
-      if (fs.existsSync(outputFile2)) {
-        transcription = fs.readFileSync(outputFile2, "utf8").trim();
-      }
+      transcription = await executeWhisperCommand(
+        WHISPER_CLI_PATH,
+        modelPath,
+        inputFile,
+        outputPath2,
+        "-nth 0.1 -wt 0.01"
+      );
     }
 
     console.log(
-      `✅ Transcription complete: "${transcription.substring(0, 100)}${transcription.length > 100 ? "..." : ""}"`
+      `✅ Transcription complete: \"${transcription.substring(0, 100)}${transcription.length > 100 ? "..." : ""}\"`
     );
 
     // Determine which audio files to keep based on options
-    const shouldSaveAudio = options.saveAudio || false;
-    
-    if (shouldSaveAudio) {
+    if (options.saveAudio) {
       console.log(`📁 Keeping audio files in job directory: ${jobDir}`);
-      
-      // If specific file types are requested, only return those
-      if (shouldSaveAudio === 'original') {
+
+      if (options.saveAudio === 'original') {
         delete audioFiles.processed;
-      } else if (shouldSaveAudio === 'processed') {
+      } else if (options.saveAudio === 'processed') {
         delete audioFiles.original;
       }
-      
-      return { 
-        transcription,
-        audioFiles
-      };
+      return { transcription, audioFiles };
+    } else {
+      // Clean up the job directory if not explicitly saving and no error occurred
+      if (jobDir && fs.existsSync(jobDir)) {
+        try {
+          fs.rmSync(jobDir, { recursive: true, force: true });
+          console.log(`🧹 Cleaned up job directory: ${jobDir}`);
+        } catch (cleanupError) {
+          console.warn(`⚠️ File cleanup error: ${(cleanupError as Error).message}`);
+        }
+      }
+      return { transcription };
     }
-
-    return { transcription };
   } catch (error) {
     console.error(`❌ Whisper transcription failed: ${(error as Error).message}`);
-    // If there was an error, we might want to keep the job directory for debugging
     if (jobDir) {
       console.log(`📁 Keeping job directory due to error: ${jobDir}`);
-      return { 
+      return {
         transcription: `Error: ${(error as Error).message}`,
         audioFiles
       };
     }
     return { transcription: `Error: ${(error as Error).message}` };
-  } finally {
-    // Clean up the job directory if not explicitly saving and no error occurred
-    if (jobDir && fs.existsSync(jobDir) && !options.saveAudio) {
-      try {
-        fs.rmSync(jobDir, { recursive: true, force: true });
-        console.log(`🧹 Cleaned up job directory: ${jobDir}`);
-      } catch (cleanupError) {
-        console.warn(`⚠️ File cleanup error: ${(cleanupError as Error).message}`);
-      }
-    }
   }
-}
-
-/**
- * Get the contents of an audio file saved during transcription
- * @param {string} filePath - Path to the audio file
- * @returns {Buffer|null} - Audio file contents or null if not found
- */
-export function getAudioFile(filePath: string): Buffer | null {
-  try {
-    if (fs.existsSync(filePath)) {
-      return fs.readFileSync(filePath);
-    }
-    return null;
-  } catch (error) {
-    console.error(`❌ Failed to read audio file: ${(error as Error).message}`);
-    return null;
-  }
-}
-
-/**
- * Copy an audio file to a user-specified location
- * @param {string} sourcePath - Path to the source audio file
- * @param {string} destinationPath - Path where the file should be copied
- * @returns {boolean} - Success status
- */
-export function copyAudioFile(sourcePath: string, destinationPath: string): boolean {
-  try {
-    if (!fs.existsSync(sourcePath)) {
-      console.error(`❌ Source file not found: ${sourcePath}`);
-      return false;
-    }
-    
-    // Create destination directory if it doesn't exist
-    const destinationDir = path.dirname(destinationPath);
-    if (!fs.existsSync(destinationDir)) {
-      fs.mkdirSync(destinationDir, { recursive: true });
-    }
-    
-    fs.copyFileSync(sourcePath, destinationPath);
-    console.log(`✅ Copied audio file to: ${destinationPath}`);
-    return true;
-  } catch (error) {
-    console.error(`❌ Failed to copy audio file: ${(error as Error).message}`);
-    return false;
-  }
-}
-
-/**
- * List all available models for Whisper
- * @returns {string[]} - List of model names
- */
-export function listAvailableModels(): string[] {
-  return MODELS_LIST;
-}
-
-/**
- * Check if a model is available locally
- * @param {string} modelName - Name of the model to check
- * @returns {boolean} - Whether the model is available
- */
-export function isModelAvailable(modelName: string): boolean {
-  const possibleModelPaths = [
-    path.join(MODELS_DIR, `ggml-${modelName}.bin`),
-    path.join("./models", `ggml-${modelName}.bin`),
-    path.join(WHISPER_SRC_DIR, "models", `ggml-${modelName}.bin`),
-  ];
-
-  for (const p of possibleModelPaths) {
-    if (fs.existsSync(p)) {
-      return true;
-    }
-  }
-
-  return false;
 }

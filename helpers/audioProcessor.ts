@@ -1,6 +1,7 @@
 import { Buffer } from 'buffer'; // Node.js Buffer
 import { WaveFile } from 'wavefile';
 import * as fs from 'fs';
+import { ulawToPCM } from 'g711';
 
 // Standard ITU G.711 mu-law encoding/decoding functions
 function linearToMuLaw(sample: number): number {
@@ -27,20 +28,8 @@ function linearToMuLaw(sample: number): number {
   return ~(sign | (segment << 4) | position) & 0xff;
 }
 
-export function muLawToLinear(mulaw: number): number {
-  mulaw = ~mulaw & 0xff;
-  const sign = mulaw & 0x80 ? -1 : 1;
-  mulaw &= 0x7f;
-  const segment = (mulaw & 0x70) >> 4;
-  const position = mulaw & 0x0f;
-
-  let magnitude = 33;
-  if (segment > 0) {
-    magnitude = (33 + (position << 3)) << (segment - 1);
-  } else {
-    magnitude = 33 + (position << 3);
-  }
-  return sign * magnitude;
+export function muLawToLinear(muLawByte: number): number {
+  return ulawToPCM(new Uint8Array([muLawByte]))[0];
 }
 
 /**
@@ -344,4 +333,18 @@ export function convertWavToMuLaw(filePath: string): Buffer {
     console.error(`Error converting WAV file: ${error}`);
     return Buffer.alloc(0);
   }
+}
+
+export function processAudioBuffer(audioBuffer: Buffer): Buffer {
+  console.log("Processing audio buffer for transcription...");
+
+  const pcmData = new Int16Array(audioBuffer.length);
+  for (let i = 0; i < audioBuffer.length; i++) {
+    pcmData[i] = muLawToLinear(audioBuffer[i]);
+  }
+
+  const wavBuffer = createWavFromPCM(pcmData, 8000);
+  console.log(`Processed audio: ${audioBuffer.length} bytes → ${wavBuffer.length} bytes`);
+
+  return wavBuffer;
 }

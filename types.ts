@@ -61,7 +61,6 @@ export interface MediaMessage {
 
 export interface MarkMessage {
   event: "mark";
-  sequenceNumber: string;
   streamSid: string;
   mark: {
     name: string;

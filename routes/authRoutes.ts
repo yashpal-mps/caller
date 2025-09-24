@@ -14,7 +14,7 @@ const SALT_ROUNDS = 10;
 router.post('/register', async (req, res) => {
   try {
     const { name, email, phone, password } = req.body;
-    
+
     // Validate input
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -22,9 +22,9 @@ router.post('/register', async (req, res) => {
         message: 'Name, email and password are required'
       });
     }
-    
+
     const db = await DatabaseConnection.getConnection();
-    
+
     // Check if user already exists
     const existingUser = await db.get('SELECT * FROM users WHERE email = ?', email);
     if (existingUser) {
@@ -33,25 +33,25 @@ router.post('/register', async (req, res) => {
         message: 'User with this email already exists'
       });
     }
-    
+
     // Hash password
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    
+
     // Insert new user
     const result = await db.run(
       'INSERT INTO users (name, email, phone, password, created_at, updated_at) VALUES (?, ?, ?, ?, datetime("now"), datetime("now"))',
       [name, email, phone || null, passwordHash]
     );
-    
-    logger.info(`New user registered: ${email}`);
-    
+
+    console.log(`New user registered: ${email}`);
+
     // Generate JWT token
     const token = jwt.sign(
       { userId: result.lastID, email },
       JWT_SECRET,
       { expiresIn: '1d' }
     );
-    
+
     res.status(201).json({
       success: true,
       message: 'User registered successfully',
@@ -76,7 +76,7 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    
+
     // Validate input
     if (!email || !password) {
       return res.status(400).json({
@@ -84,12 +84,12 @@ router.post('/login', async (req, res) => {
         message: 'Email and password are required'
       });
     }
-    
+
     const db = await DatabaseConnection.getConnection();
-    
+
     // Find user by email
     const user = await db.get('SELECT * FROM users WHERE email = ?', email);
-    
+
     if (!user) {
       logger.warn(`Login attempt for non-existent user: ${email}`);
       return res.status(401).json({
@@ -97,10 +97,10 @@ router.post('/login', async (req, res) => {
         message: 'Invalid credentials'
       });
     }
-    
+
     // Verify password
     const passwordMatch = await bcrypt.compare(password, user.password);
-    
+
     if (!passwordMatch) {
       logger.warn(`Failed login attempt for user: ${email}`);
       return res.status(401).json({
@@ -108,16 +108,16 @@ router.post('/login', async (req, res) => {
         message: 'Invalid credentials'
       });
     }
-    
+
     // Generate JWT token
     const token = jwt.sign(
       { userId: user.id, email: user.email },
       JWT_SECRET,
       { expiresIn: '1d' }
     );
-    
-    logger.info(`User logged in successfully: ${email}`);
-    
+
+    console.log(`User logged in successfully: ${email}`);
+
     res.status(200).json({
       success: true,
       token,
@@ -152,14 +152,14 @@ router.get('/profile', authenticate, async (req, res) => {
   try {
     const db = await DatabaseConnection.getConnection();
     const user = await db.get('SELECT id, name, email, phone, created_at FROM users WHERE id = ?', req.user.userId);
-    
+
     if (!user) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
-    
+
     res.status(200).json({
       success: true,
       user

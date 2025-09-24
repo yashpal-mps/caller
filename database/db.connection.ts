@@ -10,7 +10,7 @@ import path from 'path';
 const dataDir = path.dirname(dbConfig.dbPath);
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
-  logger.info(`Created database directory: ${dataDir}`);
+  console.log(`Created database directory: ${dataDir}`);
 }
 
 // Set verbose mode if needed
@@ -44,17 +44,17 @@ class DatabaseConnection {
     this.isInitializing = true;
 
     try {
-      logger.info(`Opening database connection to ${dbConfig.dbPath}`);
-      
+      console.log(`Opening database connection to ${dbConfig.dbPath}`);
+
       this.instance = await open({
         filename: dbConfig.dbPath,
         driver: sqlite3.Database,
       });
-      
+
       // Enable foreign keys
       await this.instance.exec('PRAGMA foreign_keys = ON');
-      
-      logger.info('Database connection established successfully');
+
+      console.log('Database connection established successfully');
       return this.instance;
     } catch (error) {
       logger.error('Failed to open database connection:', error);
@@ -69,7 +69,7 @@ class DatabaseConnection {
       try {
         await this.instance.close();
         this.instance = null;
-        logger.info('Database connection closed');
+        console.log('Database connection closed');
       } catch (error) {
         logger.error('Error closing database connection:', error);
         throw error;

@@ -86,7 +86,7 @@ router.post('/upload-csv', authenticate, upload.single('file'), async (req: Requ
             // Commit transaction
             await db.exec('COMMIT');
 
-            logger.info(`Imported ${results.length} contacts from CSV`);
+            console.log(`Imported ${results.length} contacts from CSV`);
             return res.status(200).json({
               message: `Successfully imported ${results.length} contacts`
             });
@@ -192,8 +192,8 @@ router.post('/make-call', authenticate, async (req: Request, res: Response) => {
       {
         customer_number: formattedNumber,
         api_key: process.env.SMARTFLO_API_KEY,
-        // get_call_id: 1,
-        // caller_id: process.env.SMARTFLO_FROM_NUMBER, // optional if DID is configured
+        get_call_id: 1,
+        caller_id: process.env.SMARTFLO_FROM_NUMBER, // optional if DID is configured
       },
       {
         headers: {
@@ -202,7 +202,7 @@ router.post('/make-call', authenticate, async (req: Request, res: Response) => {
       }
     );
 
-    logger.info(`Call initiated to ${formattedNumber}`, { response: response.data });
+    console.log(`Call initiated to ${formattedNumber}`, { response: response.data });
 
     return res.status(200).json({
       message: 'Call initiated successfully',

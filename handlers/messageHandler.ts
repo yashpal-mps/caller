@@ -10,12 +10,13 @@ import {
   ClearMessage,
   DtmfMessage,
   ErrorMessage,
+  MarkMessage,
 } from "../types";
 import { getNextSequenceNumber, resetCounters } from "../utils/sequencing";
 import { validateMediaFormat } from "../utils/validation";
-import { handleAudioProcessing } from "./audioHandler";
 import { MarkHandler } from "./markHandler";
-import { logger } from "../utils/logger";
+import { convertWavToMuLaw } from "../helpers/audioProcessor";
+import path from "path";
 
 export class MessageHandler {
   /**
@@ -28,11 +29,8 @@ export class MessageHandler {
   ): Promise<void> {
     // Log non-media events to avoid flooding the console
     if (data.event !== "media") {
-      logger.info(`Received event: ${data.event}`);
-    } else {
-      logger.media(`Received media chunk`);
+      console.log(`Received event: ${data.event}`);
     }
-
     switch (data.event) {
       case "connected":
         MessageHandler.handleConnected(socket, state);
@@ -47,6 +45,7 @@ export class MessageHandler {
         break;
 
       case "mark":
+        console.log("Received mark event: ---------------------------------", data);
         if (data.mark?.name) {
           MarkHandler.processMarkEvent(socket, state, data.mark.name);
         }
@@ -65,7 +64,7 @@ export class MessageHandler {
         break;
 
       default:
-        logger.warn(`Unknown event type: ${data.event}`);
+        console.log(`Unknown event type: ${data.event}`);
         MessageHandler.sendError(
           socket,
           state,
@@ -88,7 +87,7 @@ export class MessageHandler {
     };
 
     socket.send(JSON.stringify(connectedResponse));
-    logger.info("Sent connected response");
+    console.log("Sent connected response");
   }
 
   /**
@@ -103,55 +102,43 @@ export class MessageHandler {
     state.activeStreamStartTime = Date.now();
     state.phoneNumber = data.start?.to || null;
 
-    logger.info(`Stream started with SID: ${state.streamSid}`);
+    const wavFilePath = path.resolve("./sample.wav"); // root dir
+    const muLawBuffer = convertWavToMuLaw(wavFilePath);
 
-    // Send response to start message
-    const startResponse: StartMessage = {
-      event: "start",
-      sequenceNumber: getNextSequenceNumber(state),
+    const base64Payload = muLawBuffer.toString("base64");
+
+    const mediaMessage: MediaMessage = {
+      event: "media",
       streamSid: state.streamSid as string,
-      start: {
-        accountSid: "ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-        callSid: "CAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-        streamSid: state.streamSid as string,
-        from: data.start?.from || "XXXXXXXXXX",
-        to: data.start?.to || "XXXXXXXXXX",
-        tracks: ["inbound", "outbound"],
-        mediaFormat: {
-          encoding: "audio/x-mulaw",
-          sampleRate: 8000,
-          channels: 1,
-        },
-        customParameters: data.start?.customParameters || {},
+      sequenceNumber: getNextSequenceNumber(state),
+      media: {
+        payload: base64Payload,
       },
     };
+    console.log("Sent media message");
+    const markMessage: MarkMessage = {
+      event: "mark",
+      streamSid: state.streamSid as string,
+      mark: {
+        name: "start",
+      },
+    }
 
-    socket.send(JSON.stringify(startResponse));
+    // --- 4. Send over socket ---
+    socket.send(JSON.stringify(mediaMessage));
+    socket.send(JSON.stringify(markMessage));
   }
 
-  // First, make sure your ConnectionState type includes mediaChunks
-  // In types.ts, add:
-  // mediaChunks?: Array<{payload: string, chunk: string, timestamp?: number}>;
 
-  // Update the handleMedia method
   private static async handleMedia(
     socket: WebSocket,
     state: ConnectionState,
     data: MediaMessage
   ): Promise<void> {
-    // Validate media format
     const validation = validateMediaFormat(data);
     if (!validation.valid) {
-      MessageHandler.sendError(
-        socket,
-        state,
-        validation.error || "Invalid media format",
-        1001
-      );
       return;
     }
-
-    // Initialize the media chunks array if it doesn't exist
     if (!state.mediaChunks) {
       state.mediaChunks = [];
     }
@@ -159,25 +146,8 @@ export class MessageHandler {
     state.mediaChunks.push({
       payload: data.media.payload,
       chunk: data.media.chunk || 0,
-      timestamp: data.media.timestamp 
+      timestamp: data.media.timestamp
     });
-
-    logger.media(`Stored media chunk ${data.media.chunk}, total chunks: ${state.mediaChunks.length}`);
-
-    // For immediate feedback, you can still send a response without processing audio
-    // This acknowledges receipt without full processing
-    const mediaResponse: MediaMessage = {
-      event: "media",
-      sequenceNumber: getNextSequenceNumber(state),
-      streamSid: state.streamSid as string,
-      media: {
-        track: "outbound", // Acknowledging receipt
-        chunk: data.media.chunk,
-        payload: "" // Empty payload for acknowledgment
-      }
-    };
-
-    socket.send(JSON.stringify(mediaResponse));
   }
 
   /**
@@ -188,7 +158,7 @@ export class MessageHandler {
     state: ConnectionState,
     data: WebSocketMessage
   ): void {
-    logger.info(
+    console.log(
       "Stream stopped:",
       data.stop ? data.stop.reason : "No reason provided"
     );
@@ -219,7 +189,7 @@ export class MessageHandler {
   private static handleClear(socket: WebSocket, state: ConnectionState): void {
     if (!state.streamSid) return;
 
-    logger.info("Received clear event, sending all pending marks");
+    console.log("Received clear event, sending all pending marks");
 
     // Send all pending marks
     MarkHandler.sendAllPendingMarks(socket, state);
@@ -242,7 +212,7 @@ export class MessageHandler {
     state: ConnectionState,
     data: WebSocketMessage
   ): void {
-    logger.info(`Received DTMF: ${data.dtmf?.digit}`);
+    console.log(`Received DTMF: ${data.dtmf?.digit}`);
 
     // Echo back the DTMF if needed
     const dtmfResponse: DtmfMessage = {
@@ -274,7 +244,6 @@ export class MessageHandler {
       code,
     };
 
-    logger.error(`Sending error: ${message} (code: ${code})`);
-    socket.send(JSON.stringify(errorMessage));
+    console.log(`Sending error: ${message} (code: ${code})`);
   }
 }

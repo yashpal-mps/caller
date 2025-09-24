@@ -16,6 +16,7 @@
     "csv-parser": "^3.2.0",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "g711": "^1.0.1",
     "jsonwebtoken": "^9.0.2",
     "kokoro-js": "^1.2.1",
     "multer": "^2.0.2",
