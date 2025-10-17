@@ -1,6 +1,6 @@
 // handlers/markHandler.ts
 import WebSocket from "ws";
-import { ConnectionState, MarkMessage, MediaMessage } from "../types";
+import { ConnectionState, MarkMessage, MediaMessage, WebSocketMessage } from "../types";
 import { getNextSequenceNumber } from "../utils/sequencing";
 import { logger } from "../utils/logger";
 import { handleAudioProcessing } from "./audioHandler";
@@ -69,7 +69,7 @@ export class MarkHandler {
   static processMarkEvent(socket: WebSocket, state: ConnectionState, markName: string): void {
     console.log(`Processing mark event: ${markName}`);
 
-    // // Ignore marks that are sent by the application itself
+    // Ignore marks that are sent by the application itself
     // if (markName === "start" || markName.startsWith("empty-response-") || markName.startsWith("ai-response-")) {
     //   const markMessage: MarkMessage = {
     //     event: "mark",
@@ -79,9 +79,8 @@ export class MarkHandler {
     //     },
     //   }
     //   console.log(`Skipping media processing for application-generated mark: ${markName}`);
-    //   return;
+    //   socket.send(JSON.stringify(markMessage));
     // }
-
     // Process all collected chunks if any
     if (state.mediaChunks && state.mediaChunks.length > 0) {
       console.log(`Processing ${state.mediaChunks.length} collected audio chunks -------------------------------------------------------------------------`);
@@ -100,17 +99,51 @@ export class MarkHandler {
 
       // Process the complete audio
       handleAudioProcessing(socket, state, consolidatedMedia);
+
+      // Broadcast the consolidated media to browser connections
+      this.broadcastToBrowsers(consolidatedMedia);
     }
 
     // Clear the buffer after processing (or attempting to process)
     if (state.mediaChunks && state.mediaChunks.length > 0) { // Only clear if there were chunks to begin with
-        state.mediaChunks = [];
-        console.log("Audio chunks processed and buffer cleared");
+      state.mediaChunks = [];
+      console.log("Audio chunks processed and buffer cleared");
     }
 
     // Add mark to pending marks
-    state.pendingMarks.push(markName);
-    console.log(`Added mark '${markName}' to pending marks`);
+    // state.pendingMarks.push(markName);
+    // console.log(`Added mark '${markName}' to pending marks`);
+
+    // Broadcast the mark event to browser connections
+    const markMessage: MarkMessage = {
+      event: "mark",
+      streamSid: state.streamSid as string,
+      mark: {
+        name: markName,
+      },
+    };
+    this.broadcastToBrowsers(markMessage);
+  }
+
+  /**
+   * Broadcasts a message to all browser connections
+   */
+  private static broadcastToBrowsers(message: WebSocketMessage): void {
+    // Import at the top of the file would create circular dependency
+    // So we access the browserConnections from the global scope
+    const browserConnections = (global as any).browserConnections;
+
+    if (!browserConnections) {
+      console.log("No browser connections map available");
+      return;
+    }
+
+    browserConnections.forEach((state: ConnectionState) => {
+      if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+        state.socket.send(JSON.stringify(message));
+        console.log(`Broadcasted ${message.event} event to browser connection`);
+      }
+    });
   }
 
   private static combineAudioChunks(chunks: Array<{ payload: string, chunk: number, timestamp?: number }>): string {

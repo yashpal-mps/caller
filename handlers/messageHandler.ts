@@ -11,12 +11,15 @@ import {
   DtmfMessage,
   ErrorMessage,
   MarkMessage,
+  ConnectionType,
 } from "../types";
 import { getNextSequenceNumber, resetCounters } from "../utils/sequencing";
 import { validateMediaFormat } from "../utils/validation";
 import { MarkHandler } from "./markHandler";
 import { convertWavToMuLaw } from "../helpers/audioProcessor";
 import path from "path";
+import { readFileSync } from "fs";
+import DatabaseConnection from "../database/db.connection";
 
 export class MessageHandler {
   /**
@@ -28,9 +31,36 @@ export class MessageHandler {
     data: WebSocketMessage
   ): Promise<void> {
     // Log non-media events to avoid flooding the console
-    if (data.event !== "media") {
-      console.log(`Received event: ${data.event}`);
+    // if (data.event !== "media") {
+    // }
+
+    // Check if any browser connection is handling communications
+    const browserConnections = (global as any).browserConnections;
+    let browserHandlingCommunications = false;
+
+    if (browserConnections) {
+      browserConnections.forEach((browserState: ConnectionState) => {
+        if (browserState.isHandlingCommunications) {
+          browserHandlingCommunications = true;
+        }
+      });
     }
+
+    // If a browser is handling communications and this is a media, start, or stop event, just broadcast it
+    if (browserHandlingCommunications &&
+      (data.event === 'media' || data.event === 'start' || data.event === 'stop') &&
+      state.type === ConnectionType.SERVICE) {
+      console.log(`Browser is handling communications, forwarding ${data.event} event`);
+      if (data.event === 'media') {
+        this.broadcastToBrowsers(data as MediaMessage);
+      } else if (data.event === 'start') {
+        this.broadcastStartToBrowsers(data as StartMessage);
+      } else if (data.event === 'stop') {
+        this.broadcastStopToBrowsers(data as StopMessage);
+      }
+      return;
+    }
+
     switch (data.event) {
       case "connected":
         MessageHandler.handleConnected(socket, state);
@@ -93,26 +123,79 @@ export class MessageHandler {
   /**
    * Handle the start event
    */
-  private static handleStart(
+  private static async handleStart(
     socket: WebSocket,
     state: ConnectionState,
     data: WebSocketMessage
-  ): void {
+  ): Promise<void> {
     state.streamSid = data.streamSid || null;
     state.activeStreamStartTime = Date.now();
     state.phoneNumber = data.start?.to || null;
 
-    const wavFilePath = path.resolve("./sample.wav"); // root dir
-    const muLawBuffer = convertWavToMuLaw(wavFilePath);
+    console.log("Phone number : ", state.phoneNumber);
+    this.broadcastStartToBrowsers(data as StartMessage);
 
-    const base64Payload = muLawBuffer.toString("base64");
+    // Broadcast start event to browser connections
+    this.broadcastToBrowsers({
+      event: "media",
+      streamSid: state.streamSid || "",
+      media: {
+        payload: data.start,
+      },
+      sequenceNumber: getNextSequenceNumber(state)
+    });
+    console.log("Broadcasted start event to browser connections");
+
+    let audioPayload = "";
+
+    try {
+
+      // Get the database connection
+      const db = await DatabaseConnection.getConnection()
+
+      if (state.phoneNumber) {
+        let formattedNumber = state.phoneNumber.replace(/\D/g, '');
+
+        // Remove country code '91' if number is greater than 10 digits
+        if (formattedNumber.length > 10 && formattedNumber.startsWith('91')) {
+          formattedNumber = formattedNumber.substring(2);
+          console.log(`Removed country code, new number: ${formattedNumber}`);
+        }
+
+        // Query the database for the contact with this phone number
+        console.log(`Searching for contact with phone number: ${formattedNumber}`);
+        const contactStmt = await db.prepare('SELECT name, initial_audio FROM contacts WHERE phone LIKE ?');
+        const contact = await contactStmt.get(`%${formattedNumber}%`);
+        await contactStmt.finalize();
+
+        if (contact && contact.initial_audio) {
+          console.log(`Found contact: ${contact.name}, using personalized greeting audio`);
+          audioPayload = contact.initial_audio;
+        } else {
+          console.log("No matching contact found or no initial audio available, using fallback audio");
+          // Fallback to default audio file
+          const base64 = path.resolve("./output.b64");
+          audioPayload = readFileSync(base64, "utf8");
+        }
+      } else {
+        console.log("No phone number provided, using fallback audio");
+        // Fallback to default audio file
+        const base64 = path.resolve("./output.b64");
+        audioPayload = readFileSync(base64, "utf8");
+      }
+    } catch (error) {
+      console.error("Error fetching audio from database:", error);
+      // Fallback to default audio file
+      const base64 = path.resolve("./output.b64");
+      audioPayload = readFileSync(base64, "utf8");
+    }
 
     const mediaMessage: MediaMessage = {
       event: "media",
       streamSid: state.streamSid as string,
       sequenceNumber: getNextSequenceNumber(state),
       media: {
-        payload: base64Payload,
+        payload: audioPayload,
       },
     };
     console.log("Sent media message");
@@ -162,6 +245,7 @@ export class MessageHandler {
       "Stream stopped:",
       data.stop ? data.stop.reason : "No reason provided"
     );
+    this.broadcastStartToBrowsers(data as StopMessage);
 
     // Acknowledge the stop event
     const stopResponse: StopMessage = {
@@ -245,5 +329,65 @@ export class MessageHandler {
     };
 
     console.log(`Sending error: ${message} (code: ${code})`);
+  }
+
+  /**
+   * Broadcasts a message to all browser connections
+   */
+  private static broadcastToBrowsers(message: MediaMessage | MarkMessage): void {
+    // Access the browserConnections from the global scope
+    const browserConnections = (global as any).browserConnections;
+
+    if (!browserConnections) {
+      console.log("No browser connections map available");
+      return;
+    }
+
+    browserConnections.forEach((state: ConnectionState) => {
+      if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+        state.socket.send(JSON.stringify(message));
+        console.log(`Broadcasted ${message.event} event to browser connection`);
+      }
+    });
+  }
+
+  /**
+   * Broadcasts a start event to all browser connections
+   */
+  private static broadcastStartToBrowsers(message: StartMessage | StopMessage): void {
+    // Access the browserConnections from the global scope
+    const browserConnections = (global as any).browserConnections;
+
+    if (!browserConnections) {
+      console.log("No browser connections map available");
+      return;
+    }
+
+    browserConnections.forEach((state: ConnectionState) => {
+      if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+        state.socket.send(JSON.stringify(message));
+        console.log(`Broadcasted start event to browser connection`);
+      }
+    });
+  }
+
+  /**
+   * Broadcasts a stop event to all browser connections
+   */
+  private static broadcastStopToBrowsers(message: StopMessage): void {
+    // Access the browserConnections from the global scope
+    const browserConnections = (global as any).browserConnections;
+
+    if (!browserConnections) {
+      console.log("No browser connections map available");
+      return;
+    }
+
+    browserConnections.forEach((state: ConnectionState) => {
+      if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+        state.socket.send(JSON.stringify(message));
+        console.log(`Broadcasted stop event to browser connection`);
+      }
+    });
   }
 }

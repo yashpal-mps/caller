@@ -1,5 +1,11 @@
 // types/index.ts
 import { WebSocket } from "ws";
+
+export enum ConnectionType {
+  SERVICE = 'service',
+  BROWSER = 'browser'
+}
+
 export interface ConnectionState {
   socket: WebSocket | null;
   streamSid: string | null;
@@ -13,6 +19,9 @@ export interface ConnectionState {
     chunk: number;
     timestamp?: number;
   }>;
+  type?: ConnectionType;
+  authToken?: string;
+  isHandlingCommunications?: boolean;
 }
 
 export interface WebSocketMessage {

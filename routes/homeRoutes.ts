@@ -8,8 +8,8 @@ import csv from 'csv-parser';
 import fs from 'fs';
 import { Request, Response } from 'express';
 import axios from 'axios';
+import { generateGreetingAudio } from '../helpers/textToSpeech';
 import dotenv from "dotenv";
-import AWS from 'aws-sdk';
 dotenv.config();
 
 // Configure Smartflo API credentials
@@ -72,12 +72,20 @@ router.post('/upload-csv', authenticate, upload.single('file'), async (req: Requ
           await db.exec('BEGIN TRANSACTION');
 
           try {
-            // Prepare statement once
-            const stmt = await db.prepare('INSERT INTO contacts (name, phone) VALUES (?, ?)');
+            // Import the text-to-speech function
+
+
+            // Prepare statement once with the initial_audio field
+            const stmt = await db.prepare('INSERT INTO contacts (name, phone, initial_audio) VALUES (?, ?, ?)');
 
             // Insert each contact
             for (const contact of results) {
-              await stmt.run(contact.name, contact.phone);
+              // Generate greeting audio for the contact
+              console.log(`Generating greeting audio for ${contact.name}...`);
+              const initialAudio = await generateGreetingAudio(contact.name);
+
+              // Insert contact with the generated audio
+              await stmt.run(contact.name, contact.phone, initialAudio);
             }
 
             // Finalize the statement
@@ -86,9 +94,9 @@ router.post('/upload-csv', authenticate, upload.single('file'), async (req: Requ
             // Commit transaction
             await db.exec('COMMIT');
 
-            console.log(`Imported ${results.length} contacts from CSV`);
+            console.log(`Imported ${results.length} contacts from CSV with greeting audio`);
             return res.status(200).json({
-              message: `Successfully imported ${results.length} contacts`
+              message: `Successfully imported ${results.length} contacts with greeting audio`
             });
           } catch (error) {
             // Rollback on error

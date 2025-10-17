@@ -1,4 +1,5 @@
 import { KokoroTTS, TextSplitterStream } from "kokoro-js";
+import { convertToStreamCompatibleAudio } from "./audioProcessor";
 
 // Initialize the model once
 let ttsModel: KokoroTTS | null = null;
@@ -89,9 +90,62 @@ interface SpeakResult {
  * @param {string} text - The text to convert to speech (pass full sentences for best results)
  * @returns {ReadableStream<SpeakResult>} - Stream of structured audio chunks
  */
+/**
+ * Generates a greeting audio for a contact and returns base64 encoded mu-law audio
+ * @param name The name of the contact
+ * @returns Base64 encoded mu-law audio
+ */
+export async function generateGreetingAudio(name: string): Promise<string> {
+  try {
+    const greetingText = `namaste! kya meri baat ${name} ji se hor rhi h?`;
+    console.log(`🔄 Generating greeting audio for ${name}`);
+
+    const result = await speak(greetingText);
+
+    // Convert to 8kHz mu-law format
+    const muLawBuffer = convertToStreamCompatibleAudio(
+      result.audio,
+      result.sampling_rate,
+      8000
+    );
+
+    // Convert to base64
+    const base64Audio = muLawBuffer.toString('base64');
+    console.log(`✅ Generated greeting audio for ${name} (${base64Audio.length} bytes base64)`);
+
+    // Save the audio to a file
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      // Create a directory for greeting audios if it doesn't exist
+      const greetingsDir = path.resolve('./greetings');
+      if (!fs.existsSync(greetingsDir)) {
+        fs.mkdirSync(greetingsDir, { recursive: true });
+      }
+      
+      // Create a filename based on the name and timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = path.join(greetingsDir, `greeting_${name.replace(/\s+/g, '_')}_${timestamp}.b64`);
+      
+      // Write the base64 audio to the file
+      fs.writeFileSync(filename, base64Audio);
+      console.log(`✅ Saved greeting audio to file: ${filename}`);
+    } catch (fileError: any) {
+      console.error(`❌ Failed to save greeting audio to file: ${fileError.message}`);
+      // Continue even if file saving fails
+    }
+
+    return base64Audio;
+  } catch (error: any) {
+    console.error(`❌ Failed to generate greeting audio for ${name}: ${error.message}`);
+    return '';
+  }
+}
+
 export async function* speakStream(text: string): AsyncGenerator<{ text: string; phonemes: string; audio: Float32Array }> {
   console.log(`🔄 Setting up streaming speech for text input`);
-  
+
   try {
     // Ensure the model is initialized
     const tts = await getTTSModel();
